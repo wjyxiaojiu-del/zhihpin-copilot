@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import StepBar from '../components/StepBar';
 import Badge from '../components/Badge';
 import Tag from '../components/Tag';
-import { mockCandidates } from '../data/mockData';
+import { mockCandidates, type Candidate } from '../data/mockData';
 import FeishuPush from '../components/FeishuPush';
+import { candidatesApi } from '@/lib/api';
 
 const dims = [
   { key: 'matchScore' as const, label: '岗位匹配' },
@@ -17,7 +18,58 @@ const dims = [
 ];
 
 export default function ComparePage() {
-  const [selected, setSelected] = useState<string[]>(['c001', 'c002', 'c003']);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [apiCandidates, setApiCandidates] = useState<Candidate[]>([]);
+
+  useEffect(() => {
+    candidatesApi.list().then(cands => {
+      if (cands.length > 0) {
+        const mapped = cands.map((c: Record<string, unknown>) => ({
+          id: c.id as string,
+          name: c.name as string,
+          avatar: c.avatar as string,
+          phone: c.phone as string,
+          email: c.email as string,
+          age: c.age as number,
+          gender: c.gender as string,
+          school: c.school as string,
+          schoolTier: c.schoolTier as Candidate['schoolTier'],
+          degree: c.degree as Candidate['degree'],
+          major: c.major as string,
+          workYears: c.workYears as number,
+          currentCompany: c.currentCompany as string,
+          currentTitle: c.currentTitle as string,
+          jobHoppingCount: c.jobHoppingCount as number,
+          expectedSalary: c.expectedSalary as string,
+          background: c.background as string,
+          skills: c.skills as string[],
+          projects: c.projects as { name: string; description: string }[],
+          expectedPosition: c.expectedPosition as string,
+          matchScore: (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70,
+          level: (() => {
+            const score = (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70;
+            return score >= 85 ? '强烈推荐' as const : score >= 70 ? '推荐' as const : score >= 55 ? '待观察' as const : '不推荐' as const;
+          })(),
+          strengths: (c.evaluations as Array<{ strengths: string[] }>)?.[0]?.strengths || [],
+          risks: (c.evaluations as Array<{ risks: string[] }>)?.[0]?.risks || [],
+          interviewDirection: [],
+          score: {
+            matchScore: (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70,
+            professional: 70, communication: 70, potential: 70, stability: 70,
+          },
+          summary: '',
+          resume: (c.resumeText as string) || '',
+        })) as Candidate[];
+        setApiCandidates(mapped);
+        // Auto-select first 3
+        setSelected(mapped.slice(0, 3).map(c => c.id));
+      }
+    }).catch(() => {
+      setSelected(mockCandidates.slice(0, 3).map(c => c.id));
+    });
+  }, []);
+
+  const allCandidates = apiCandidates.length > 0 ? apiCandidates : mockCandidates;
 
   const toggle = (id: string) => {
     setSelected(prev =>
@@ -25,7 +77,7 @@ export default function ComparePage() {
     );
   };
 
-  const comparing = mockCandidates.filter(c => selected.includes(c.id));
+  const comparing = allCandidates.filter(c => selected.includes(c.id));
   const topId = comparing.length > 0 ? comparing.reduce((a, b) => a.matchScore >= b.matchScore ? a : b).id : '';
 
   return (
@@ -44,7 +96,7 @@ export default function ComparePage() {
           <span className="text-[14px] text-[#a8a29e]">已选 {selected.length} 位</span>
         </div>
         <div className="flex flex-wrap gap-2">
-          {mockCandidates.map(c => {
+          {allCandidates.map(c => {
             const active = selected.includes(c.id);
             return (
               <button

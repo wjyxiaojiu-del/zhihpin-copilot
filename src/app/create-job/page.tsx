@@ -6,6 +6,7 @@ import StepBar from '../components/StepBar';
 import Tag from '../components/Tag';
 import FeishuPush from '../components/FeishuPush';
 import FeishuDoc from '../components/FeishuDoc';
+import { jobsApi } from '@/lib/api';
 
 interface GeneratedMatchRules {
   mustHave: string[];
@@ -29,69 +30,53 @@ export default function CreateJobPage() {
   const [generated, setGenerated] = useState(false);
   const [matchRules, setMatchRules] = useState<GeneratedMatchRules | null>(null);
   const [activeTab, setActiveTab] = useState<'jd' | 'rules'>('jd');
+  const [generatedJD, setGeneratedJD] = useState<{
+    responsibilities: string[];
+    requirements: string[];
+    bonuses: string[];
+    salaryRange: string;
+  }>({
+    responsibilities: ['正在生成...'],
+    requirements: [],
+    bonuses: [],
+    salaryRange: '',
+  });
+  const [aiPowered, setAiPowered] = useState(false);
 
-  const generatedJD = {
-    responsibilities: [
-      '负责公司 SaaS 产品的前端架构设计与核心模块开发',
-      '参与产品需求评审，提出前端技术方案并推动落地',
-      '优化前端性能，提升页面加载速度和用户交互体验',
-      '编写高质量、可维护的前端代码，参与代码评审',
-      '与后端、产品、设计团队紧密协作，确保项目按时交付',
-    ],
-    requirements: [
-      '本科及以上学历，计算机相关专业优先',
-      '3 年以上前端开发经验，熟练掌握 React/Vue 生态',
-      '精通 TypeScript、HTML5、CSS3，熟悉响应式布局',
-      '熟悉 Webpack/Vite 等构建工具，有性能优化经验',
-      '具备良好的代码规范和团队协作意识',
-    ],
-    bonuses: [
-      '有大型 SaaS 产品开发经验',
-      '熟悉 Node.js，有全栈开发能力',
-      '有微前端、低代码平台等技术实践',
-      '参与过开源项目或有技术博客',
-    ],
-    salaryRange: '20K-35K / 月（14 薪）',
-  };
-
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setLoading(true);
     setGenerated(false);
     setMatchRules(null);
-    setTimeout(() => {
-      setLoading(false);
-      setGenerated(true);
-      // 自动生成匹配规则
+    try {
+      const result = await jobsApi.generate(form) as Record<string, unknown>;
+      const jd = result.generatedJD as typeof generatedJD;
+      const rules = result.matchRules as Record<string, unknown>;
+      setGeneratedJD(jd);
       setMatchRules({
-        mustHave: [
-          '本科及以上学历',
-          '3 年以上前端开发经验',
-          '熟练掌握 React',
-          '精通 TypeScript',
-          '熟悉 Webpack/Vite 构建工具',
-        ],
-        niceToHave: [
-          '有大型 SaaS 产品经验',
-          '熟悉 Node.js 全栈开发',
-          '有微前端架构经验',
-          '有性能优化实战经验',
-          '参与过开源项目',
-        ],
-        eliminationCriteria: [
-          '缺少 React 或 TypeScript 核心技能',
-          '薪资期望严重超出预算 50% 以上',
-          '频繁跳槽（2 年内 3 次以上）',
-          '无任何团队协作经验',
-        ],
-        interviewFocus: [
-          { topic: 'React 核心原理', verification: '提问 Hooks 闭包陷阱、虚拟 DOM Diff 算法' },
-          { topic: '项目架构设计', verification: '要求画出项目架构图，解释技术选型理由' },
-          { topic: '性能优化实战', verification: '给出具体优化案例和数据指标' },
-          { topic: '团队协作能力', verification: '情景题：代码评审分歧如何处理' },
-        ],
-        salaryRange: '20K-35K / 月（14 薪）',
+        mustHave: (rules.mustHave as string[]) || [],
+        niceToHave: (rules.niceToHave as string[]) || [],
+        eliminationCriteria: (rules.eliminationCriteria as string[]) || [],
+        interviewFocus: ((rules.interviewFocus as string[]) || []).map(t => ({ topic: t, verification: '' })),
+        salaryRange: jd.salaryRange || '',
       });
-    }, 2000);
+      setAiPowered(result.aiPowered as boolean);
+      setGenerated(true);
+    } catch {
+      // fallback
+      setGeneratedJD({
+        responsibilities: [
+          `负责${form.title}相关的日常工作`,
+          '参与团队技术方案讨论与评审',
+          '编写高质量代码并参与代码评审',
+        ],
+        requirements: ['本科及以上学历', '具备相关领域工作经验', '良好的沟通能力'],
+        bonuses: ['有大型项目经验', '有技术博客或开源贡献'],
+        salaryRange: '面议',
+      });
+      setGenerated(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

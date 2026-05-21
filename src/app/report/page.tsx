@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import StepBar from '../components/StepBar';
@@ -9,6 +9,7 @@ import Tag from '../components/Tag';
 import { mockCandidates } from '../data/mockData';
 import FeishuPush from '../components/FeishuPush';
 import FeishuDoc from '../components/FeishuDoc';
+import { candidatesApi, evaluationsApi } from '@/lib/api';
 
 const dimensions = [
   { key: 'matchScore' as const, label: '岗位匹配', desc: '与 JD 要求的吻合程度' },
@@ -82,7 +83,73 @@ function ReportContent() {
   const searchParams = useSearchParams();
   const initialId = searchParams.get('id') || 'c001';
   const [selectedId, setSelectedId] = useState(initialId);
-  const candidate = mockCandidates.find(c => c.id === selectedId) || mockCandidates[0];
+  const [apiCandidates, setApiCandidates] = useState<typeof mockCandidates>([]);
+  const [apiEvaluations, setApiEvaluations] = useState<Record<string, { overallScore: number; dimensions: Array<{ key: string; score: number }>; strengths: { text: string }[]; risks: { text: string }[]; summary: string }>>({});
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [cands, evals] = await Promise.all([candidatesApi.list(), evaluationsApi.list()]);
+        if (cands.length > 0) {
+          const mapped = cands.map((c: Record<string, unknown>) => ({
+            id: c.id as string,
+            name: c.name as string,
+            avatar: c.avatar as string,
+            phone: c.phone as string,
+            email: c.email as string,
+            age: c.age as number,
+            gender: c.gender as string,
+            school: c.school as string,
+            schoolTier: c.schoolTier as typeof mockCandidates[0]['schoolTier'],
+            degree: c.degree as typeof mockCandidates[0]['degree'],
+            major: c.major as string,
+            workYears: c.workYears as number,
+            currentCompany: c.currentCompany as string,
+            currentTitle: c.currentTitle as string,
+            jobHoppingCount: c.jobHoppingCount as number,
+            expectedSalary: c.expectedSalary as string,
+            background: c.background as string,
+            skills: c.skills as string[],
+            projects: c.projects as { name: string; description: string }[],
+            expectedPosition: c.expectedPosition as string,
+            matchScore: (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70,
+            level: (() => {
+              const score = (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70;
+              return score >= 85 ? '强烈推荐' as const : score >= 70 ? '推荐' as const : score >= 55 ? '待观察' as const : '不推荐' as const;
+            })(),
+            strengths: (c.evaluations as Array<{ strengths: { text: string }[] }>)?.[0]?.strengths?.map(s => s.text) || [],
+            risks: (c.evaluations as Array<{ risks: { text: string }[] }>)?.[0]?.risks?.map(r => r.text) || [],
+            interviewDirection: [],
+            score: {
+              matchScore: (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70,
+              professional: 70, communication: 70, potential: 70, stability: 70,
+            },
+            summary: (c.evaluations as Array<{ summary: string }>)?.[0]?.summary || '',
+            resume: (c.resumeText as string) || '',
+          }));
+          setApiCandidates(mapped);
+        }
+        // Map evaluations by candidateId
+        const evalMap: Record<string, typeof apiEvaluations[string]> = {};
+        for (const e of evals as Record<string, unknown>[]) {
+          evalMap[e.candidateId as string] = {
+            overallScore: e.overallScore as number,
+            dimensions: e.dimensions as Array<{ key: string; score: number }>,
+            strengths: e.strengths as { text: string }[],
+            risks: e.risks as { text: string }[],
+            summary: e.summary as string,
+          };
+        }
+        setApiEvaluations(evalMap);
+      } catch (e) {
+        console.error('Failed to load report data:', e);
+      }
+    }
+    load();
+  }, []);
+
+  const allCandidates = apiCandidates.length > 0 ? apiCandidates : mockCandidates;
+  const candidate = allCandidates.find(c => c.id === selectedId) || allCandidates[0];
 
   const overallLevel = getScoreLevel(candidate.matchScore);
 
@@ -97,7 +164,7 @@ function ReportContent() {
 
       {/* Candidate Tabs */}
       <div className="flex gap-1.5 mb-5 bg-white rounded-lg border border-[#e8e4df] p-1.5 inline-flex">
-        {mockCandidates.map(c => (
+        {allCandidates.map(c => (
           <button
             key={c.id}
             onClick={() => setSelectedId(c.id)}

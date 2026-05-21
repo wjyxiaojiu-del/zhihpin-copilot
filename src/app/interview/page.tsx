@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import StepBar from '../components/StepBar';
 import Badge from '../components/Badge';
 import { mockCandidates, mockInterviewQuestions, type InterviewQuestion } from '../data/mockData';
 import FeishuPush from '../components/FeishuPush';
+import { candidatesApi, interviewsApi } from '@/lib/api';
 
 const typeConfig: Record<string, { icon: string; bg: string; text: string; border: string }> = {
   '专业能力': { icon: '💡', bg: 'bg-[#fdf2ee]', text: 'text-[#9a4328]', border: 'border-[#e8d5cc]' },
@@ -43,6 +44,7 @@ function InterviewContent() {
 
   // 面试闭环状态
   const [mode, setMode] = useState<'prepare' | 'interview' | 'feedback'>('prepare');
+  const [interviewId, setInterviewId] = useState<string | null>(null);
   const [session, setSession] = useState<InterviewSession>({
     candidateId: initialId,
     interviewerName: '',
@@ -53,25 +55,50 @@ function InterviewContent() {
     submitted: false,
   });
 
-  const selectedCandidate = mockCandidates.find(c => c.id === selectedId);
+  // 从 API 加载候选人
+  const [apiCandidates, setApiCandidates] = useState<Record<string, unknown>[]>([]);
+  useEffect(() => {
+    candidatesApi.list().then(setApiCandidates).catch(() => {});
+  }, []);
 
-  const handleGenerate = () => {
+  const allCandidates = apiCandidates.length > 0 ? apiCandidates : mockCandidates;
+  const selectedCandidate = (allCandidates as Array<Record<string, unknown> & { id: string; name: string; avatar: string; school: string; schoolTier: string; degree: string; workYears: number; skills: string[]; matchScore: number; level: string }>).find(c => c.id === selectedId) || allCandidates[0] as Record<string, unknown> & { id: string; name: string; avatar: string; school: string; schoolTier: string; degree: string; workYears: number; skills: string[]; matchScore: number; level: string };
+
+  const handleGenerate = async () => {
     if (!selectedId) return;
     setLoading(true);
     setQuestions(null);
     setExpandedIdx(null);
     setMode('prepare');
-    setTimeout(() => {
-      setQuestions(mockInterviewQuestions[selectedId] || []);
-      // 初始化反馈
-      const qs = mockInterviewQuestions[selectedId] || [];
+    try {
+      const result = await interviewsApi.generateQuestions(selectedId) as Record<string, unknown>;
+      const qs = result.questions as InterviewQuestion[];
+      setQuestions(qs);
+      // Create an interview record to get an ID for feedback submission
+      try {
+        const job = (apiCandidates as Array<Record<string, unknown>>).find(c => c.id === selectedId)?.jobId as string || '';
+        const created = await interviewsApi.create({ candidateId: selectedId, jobId: job }) as Record<string, unknown>;
+        setInterviewId(created.id as string);
+      } catch {
+        setInterviewId(null);
+      }
       setSession(prev => ({
         ...prev,
         candidateId: selectedId,
         feedbacks: qs.map((_, i) => ({ questionIdx: i, answer: '', score: 0, comment: '' })),
       }));
+    } catch {
+      // fallback to mock
+      const qs = mockInterviewQuestions[selectedId] || [];
+      setQuestions(qs);
+      setSession(prev => ({
+        ...prev,
+        candidateId: selectedId,
+        feedbacks: qs.map((_, i) => ({ questionIdx: i, answer: '', score: 0, comment: '' })),
+      }));
+    } finally {
       setLoading(false);
-    }, 1800);
+    }
   };
 
   const handleStartInterview = () => {
@@ -80,7 +107,26 @@ function InterviewContent() {
     setSession(prev => ({ ...prev, startedAt: new Date().toISOString() }));
   };
 
-  const handleSubmitFeedback = () => {
+  const handleSubmitFeedback = async () => {
+    if (interviewId) {
+      try {
+        await interviewsApi.submitFeedback({
+          interviewId,
+          feedback: {
+            candidateId: selectedId,
+            interviewerName: session.interviewerName,
+            feedbacks: session.feedbacks,
+            overallComment: session.overallComment,
+            recommendation: session.recommendation,
+            avgScore: session.feedbacks.length > 0
+              ? Math.round(session.feedbacks.reduce((sum, f) => sum + f.score, 0) / session.feedbacks.filter(f => f.score > 0).length)
+              : 0,
+          },
+        });
+      } catch (e) {
+        console.error('Failed to submit feedback:', e);
+      }
+    }
     setSession(prev => ({ ...prev, submitted: true }));
     setMode('feedback');
   };
@@ -118,7 +164,7 @@ function InterviewContent() {
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
-          {mockCandidates.map(c => (
+          {(allCandidates as Array<Record<string, unknown> & { id: string; name: string; avatar: string; matchScore: number }>).map(c => (
             <button
               key={c.id}
               onClick={() => { setSelectedId(c.id); setQuestions(null); setMode('prepare'); }}

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, Suspense, useRef } from 'react';
+import { useState, Suspense, useRef, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import StepBar from '../components/StepBar';
 import Badge from '../components/Badge';
 import Tag from '../components/Tag';
 import { mockCandidates, mockJob, type Candidate } from '../data/mockData';
+import { candidatesApi, jobsApi } from '@/lib/api';
 
 const schoolTiers = ['全部', '985', '211', '双非', '二本', '大专'];
 const degrees = ['全部', '博士', '硕士', '本科', '大专'];
@@ -20,7 +21,7 @@ const tierColors: Record<string, { bg: string; text: string }> = {
 };
 
 // 证据链评分组件
-function EvidenceScorePanel({ candidate }: { candidate: Candidate }) {
+function EvidenceScorePanel({ candidate, job }: { candidate: Candidate; job: typeof mockJob }) {
   const [weights, setWeights] = useState({
     hardMatch: 30,
     skillMatch: 25,
@@ -31,8 +32,7 @@ function EvidenceScorePanel({ candidate }: { candidate: Candidate }) {
   });
   const [showWeightEditor, setShowWeightEditor] = useState(false);
 
-  const rules = mockJob.matchRules!;
-  const resume = candidate.resume || '';
+  const rules = job.matchRules!;
 
   // 证据链评分
   const dimensions = [
@@ -240,106 +240,123 @@ function calculateSalaryMatch(c: Candidate, rules: typeof mockJob.matchRules): n
 }
 
 // 简历上传组件
-function ResumeUpload({ onUpload }: { onUpload: (files: File[]) => void }) {
+function ResumeUpload({ onUploadDone, jobId }: { onUploadDone: () => void; jobId: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploaded, setUploaded] = useState<string[]>([]);
+  const [parsing, setParsing] = useState(false);
+  const [fileNames, setFileNames] = useState<string[]>([]);
+  const [result, setResult] = useState<'idle' | 'done' | 'error'>('idle');
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const files = Array.from(e.dataTransfer.files).filter(f =>
-      f.name.endsWith('.pdf') || f.name.endsWith('.docx') || f.name.endsWith('.txt')
+      /\.(pdf|docx|txt|png|jpg|jpeg|bmp|tiff)$/i.test(f.name)
     );
     if (files.length > 0) handleFiles(files);
   };
 
   const handleFiles = async (files: File[]) => {
-    setUploading(true);
+    setParsing(true);
+    setFileNames(files.map(f => f.name));
+    setResult('idle');
+
     const formData = new FormData();
     files.forEach(f => formData.append('files', f));
-    formData.append('jobId', 'job-001');
+    formData.append('jobId', jobId);
 
     try {
       const res = await fetch('/api/candidates/upload', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success) {
-        setUploaded(files.map(f => f.name));
-        onUpload(files);
+        setResult('done');
+        onUploadDone();
+        setTimeout(() => { setResult('idle'); setFileNames([]); }, 3000);
+      } else {
+        setResult('error');
       }
     } catch {
-      setUploaded(files.map(f => f.name));
-      onUpload(files);
+      setResult('error');
+    } finally {
+      setParsing(false);
     }
-    setUploading(false);
   };
 
   return (
-    <div
-      className={`border-2 border-dashed rounded-lg p-6 text-center transition-all ${
-        dragging ? 'border-[#c96442] bg-[#fdf2ee]' : 'border-[#e8e4df] hover:border-[#d5d0ca]'
-      }`}
-      onDragOver={e => { e.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
-    >
-      <input
-        ref={fileRef}
-        type="file"
-        multiple
-        accept=".pdf,.docx,.txt"
-        className="hidden"
-        onChange={e => {
-          const files = Array.from(e.target.files || []);
-          if (files.length > 0) handleFiles(files);
-        }}
-      />
-      {uploading ? (
-        <div className="flex flex-col items-center gap-2">
-          <div className="relative w-8 h-8">
-            <div className="absolute inset-0 rounded-full border-2 border-[#e8e4df]" />
-            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[#c96442] animate-spin-slow" />
+    <>
+      <div
+        className={`border-2 border-dashed rounded-lg p-6 text-center transition-all ${
+          dragging ? 'border-[#c96442] bg-[#fdf2ee]' : 'border-[#e8e4df] hover:border-[#d5d0ca]'
+        }`}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.bmp,.tiff"
+          className="hidden"
+          onChange={e => {
+            const files = Array.from(e.target.files || []);
+            if (files.length > 0) handleFiles(files);
+          }}
+        />
+        <svg className="w-8 h-8 mx-auto mb-2 text-[#a8a29e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <p className="text-[13px] text-[#5e5a55]">拖拽简历文件到此处，或</p>
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={parsing}
+          className="mt-2 px-4 py-1.5 rounded-md bg-[#c96442] text-white text-[12px] font-medium hover:bg-[#b85636] transition-colors disabled:opacity-50"
+        >
+          {parsing ? '解析中...' : '选择文件'}
+        </button>
+        <p className="text-[11px] text-[#a8a29e] mt-2">支持 PDF / DOCX / TXT / PNG / JPG，可批量上传</p>
+      </div>
+
+      {/* 后台解析浮动提示 */}
+      {parsing && (
+        <div className="fixed bottom-6 right-6 z-50 bg-white rounded-xl shadow-lg border border-[#e8e4df] p-4 max-w-[300px] animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="relative w-5 h-5 shrink-0">
+              <div className="absolute inset-0 rounded-full border-2 border-[#e8e4df]" />
+              <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[#c96442] animate-spin-slow" />
+            </div>
+            <div>
+              <span className="text-[13px] font-medium text-[#2d2a26]">后台解析中</span>
+              <p className="text-[11px] text-[#8a8580]">{fileNames.join('、')}</p>
+            </div>
           </div>
-          <p className="text-[13px] text-[#5e5a55]">AI 解析简历中...</p>
-        </div>
-      ) : uploaded.length > 0 ? (
-        <div>
-          <svg className="w-8 h-8 mx-auto mb-2 text-[#4a7c59]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-          <p className="text-[13px] text-[#3d5e47] font-medium">已上传 {uploaded.length} 份简历</p>
-          <div className="mt-2 space-y-1">
-            {uploaded.map(name => (
-              <p key={name} className="text-[12px] text-[#8a8580]">{name}</p>
-            ))}
-          </div>
-          <button
-            onClick={() => { setUploaded([]); fileRef.current?.click(); }}
-            className="mt-3 text-[12px] text-[#c96442] hover:text-[#b85636] font-medium"
-          >
-            继续上传
-          </button>
-        </div>
-      ) : (
-        <div>
-          <svg className="w-8 h-8 mx-auto mb-2 text-[#a8a29e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-          <p className="text-[13px] text-[#5e5a55]">拖拽简历文件到此处，或</p>
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="mt-2 px-4 py-1.5 rounded-md bg-[#c96442] text-white text-[12px] font-medium hover:bg-[#b85636] transition-colors"
-          >
-            选择文件
-          </button>
-          <p className="text-[11px] text-[#a8a29e] mt-2">支持 PDF、DOCX、TXT 格式，可批量上传</p>
+          <p className="text-[11px] text-[#a8a29e] mt-2">可以继续浏览其他候选人</p>
         </div>
       )}
-    </div>
+
+      {result === 'done' && !parsing && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#e4ede6] rounded-xl shadow-lg border border-[#c8ddd0] p-4 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#3d5e47] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
+            <span className="text-[13px] font-medium text-[#3d5e47]">解析完成，已刷新列表</span>
+          </div>
+        </div>
+      )}
+
+      {result === 'error' && !parsing && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#fde5e3] rounded-xl shadow-lg border border-[#f0c0bc] p-4 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-[#8c2e24] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+            <span className="text-[13px] text-[#8c2e24]">解析失败，请重试</span>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
-function MatchAnalysis({ candidate }: { candidate: Candidate }) {
-  const rules = mockJob.matchRules!;
+function MatchAnalysis({ candidate, job }: { candidate: Candidate; job: typeof mockJob }) {
+  const rules = job.matchRules!;
   const skillMatch = rules.mustHave.filter(s => candidate.skills.some(cs => cs.includes(s)));
   const skillMiss = rules.mustHave.filter(s => !candidate.skills.some(cs => cs.includes(s)));
   const niceMatch = rules.niceToHave.filter(s => candidate.skills.some(cs => cs.includes(s)));
@@ -413,7 +430,7 @@ function MatchAnalysis({ candidate }: { candidate: Candidate }) {
         </div>
         <div className="flex items-center justify-between text-[13px] mt-1">
           <span className="text-[#8a8580]">岗位预算</span>
-          <span className="font-medium text-[#4a7c59]">{mockJob.generatedJD?.salaryRange}</span>
+          <span className="font-medium text-[#4a7c59]">{job.generatedJD?.salaryRange}</span>
         </div>
       </div>
     </div>
@@ -465,14 +482,74 @@ function CandidatesContent() {
   const [showMatch, setShowMatch] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [apiCandidates, setApiCandidates] = useState<Candidate[]>([]);
+  const [apiJob, setApiJob] = useState<typeof mockJob | null>(null);
 
-  const filtered = mockCandidates
+  useEffect(() => {
+    async function load() {
+      try {
+        const [cands, jobs] = await Promise.all([candidatesApi.list(), jobsApi.list()]);
+        if (cands.length > 0) {
+          const mapped = cands.map((c: Record<string, unknown>) => ({
+            id: c.id as string,
+            name: c.name as string,
+            avatar: c.avatar as string,
+            phone: c.phone as string,
+            email: c.email as string,
+            age: c.age as number,
+            gender: c.gender as string,
+            school: c.school as string,
+            schoolTier: c.schoolTier as Candidate['schoolTier'],
+            degree: c.degree as Candidate['degree'],
+            major: c.major as string,
+            workYears: c.workYears as number,
+            currentCompany: c.currentCompany as string,
+            currentTitle: c.currentTitle as string,
+            jobHoppingCount: c.jobHoppingCount as number,
+            expectedSalary: c.expectedSalary as string,
+            background: c.background as string,
+            skills: c.skills as string[],
+            projects: c.projects as { name: string; description: string }[],
+            expectedPosition: c.expectedPosition as string,
+            matchScore: (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70,
+            level: (() => {
+              const score = (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70;
+              return score >= 85 ? '强烈推荐' as const : score >= 70 ? '推荐' as const : score >= 55 ? '待观察' as const : '不推荐' as const;
+            })(),
+            strengths: [], risks: [], interviewDirection: [],
+            score: { matchScore: 70, professional: 70, communication: 70, potential: 70, stability: 70 },
+            summary: '',
+            resume: (c.resumeText as string) || '',
+          })) as Candidate[];
+          setApiCandidates(mapped);
+        }
+        if (jobs.length > 0) {
+          const j = jobs[0] as Record<string, unknown>;
+          setApiJob({
+            id: j.id as string, title: j.title as string, companyType: j.companyType as string,
+            headcount: j.headcount as number, responsibilities: j.responsibilities as string,
+            requirements: j.requirements as string,
+            generatedJD: j.generatedJD as typeof mockJob.generatedJD,
+            matchRules: j.matchRules as typeof mockJob.matchRules,
+          });
+        }
+      } catch (e) {
+        console.error('Failed to load candidates:', e);
+      }
+    }
+    load();
+  }, []);
+
+  const allCandidates = apiCandidates.length > 0 ? apiCandidates : mockCandidates;
+  const job = apiJob || mockJob;
+
+  const filtered = allCandidates
     .filter(c => filterLevel === 'all' || c.level === filterLevel)
     .filter(c => filterTier === '全部' || c.schoolTier === filterTier)
     .filter(c => filterDegree === '全部' || c.degree === filterDegree)
     .sort((a, b) => sortBy === 'score' ? b.matchScore - a.matchScore : a.name.localeCompare(b.name));
 
-  const selectedCandidate = mockCandidates.find(c => c.id === selected) || mockCandidates[0];
+  const selectedCandidate = allCandidates.find(c => c.id === selected) || allCandidates[0];
 
   return (
     <div className="max-w-[1200px] mx-auto px-4 md:px-6 py-6">
@@ -481,7 +558,7 @@ function CandidatesContent() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-[20px] font-bold text-[#2d2a26]">简历筛选</h1>
-          <p className="text-[14px] text-[#8a8580] mt-0.5">AI 已完成 {mockCandidates.length} 份简历的智能评估与排序</p>
+          <p className="text-[14px] text-[#8a8580] mt-0.5">AI 已完成 {allCandidates.length} 份简历的智能评估与排序</p>
         </div>
         <button
           onClick={() => setShowUpload(!showUpload)}
@@ -498,8 +575,50 @@ function CandidatesContent() {
       {showUpload && (
         <div className="glass-card rounded-lg p-5 mb-4 animate-fade-in">
           <h3 className="text-[14px] font-semibold text-[#2d2a26] mb-3">批量导入简历</h3>
-          <ResumeUpload onUpload={(files) => {
-            console.log('Uploaded:', files.map(f => f.name));
+          <ResumeUpload jobId={job.id} onUploadDone={async () => {
+            // 上传成功后重新加载候选人列表
+            try {
+              const cands = await candidatesApi.list();
+              if (cands.length > 0) {
+                const mapped = cands.map((c: Record<string, unknown>) => ({
+                  id: c.id as string,
+                  name: c.name as string,
+                  avatar: c.avatar as string,
+                  school: c.school as string,
+                  schoolTier: c.schoolTier as Candidate['schoolTier'],
+                  degree: c.degree as Candidate['degree'],
+                  major: c.major as string,
+                  workYears: c.workYears as number,
+                  currentCompany: c.currentCompany as string,
+                  currentTitle: c.currentTitle as string,
+                  jobHoppingCount: c.jobHoppingCount as number,
+                  expectedSalary: c.expectedSalary as string,
+                  background: c.background as string,
+                  phone: c.phone as string,
+                  email: c.email as string,
+                  age: c.age as number,
+                  gender: c.gender as string,
+                  skills: c.skills as string[],
+                  projects: c.projects as { name: string; description: string }[],
+                  expectedPosition: c.expectedPosition as string,
+                  matchScore: (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70,
+                  level: (() => {
+                    const score = (c.evaluations as Array<{ overallScore: number }>)?.[0]?.overallScore ?? 70;
+                    return score >= 85 ? '强烈推荐' as const : score >= 70 ? '推荐' as const : score >= 55 ? '待观察' as const : '不推荐' as const;
+                  })(),
+                  strengths: [], risks: [], interviewDirection: [],
+                  score: { matchScore: 70, professional: 70, communication: 70, potential: 70, stability: 70 },
+                  summary: '',
+                  resume: (c.resumeText as string) || '',
+                })) as Candidate[];
+                setApiCandidates(mapped);
+                // 自动选中最新上传的候选人
+                if (mapped.length > 0) setSelected(mapped[0].id);
+              }
+            } catch (e) {
+              console.error('Failed to refresh candidates:', e);
+            }
+            setShowUpload(false);
           }} />
         </div>
       )}
@@ -520,7 +639,7 @@ function CandidatesContent() {
             >
               {level === 'all' ? '全部' : level}
               {level !== 'all' && (
-                <span className="ml-1 opacity-60">{mockCandidates.filter(c => c.level === level).length}</span>
+                <span className="ml-1 opacity-60">{allCandidates.filter(c => c.level === level).length}</span>
               )}
             </button>
           ))}
@@ -724,7 +843,7 @@ function CandidatesContent() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c96442" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5" /></svg>
                   证据链评分引擎
                 </h4>
-                <EvidenceScorePanel candidate={selectedCandidate} />
+                <EvidenceScorePanel candidate={selectedCandidate} job={job} />
               </div>
             )}
 
@@ -735,7 +854,7 @@ function CandidatesContent() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c96442" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5" /></svg>
                   岗位匹配分析
                 </h4>
-                <MatchAnalysis candidate={selectedCandidate} />
+                <MatchAnalysis candidate={selectedCandidate} job={job} />
               </div>
             )}
 
@@ -743,7 +862,7 @@ function CandidatesContent() {
               <DetailSection title="技能标签">
                 <div className="flex flex-wrap gap-1.5">
                   {selectedCandidate.skills.map(s => {
-                    const jdSkills = ['React', 'TypeScript', 'Node.js', 'Webpack', 'Vue'];
+                    const jdSkills = [...(job.matchRules?.mustHave || []), ...(job.matchRules?.niceToHave || [])];
                     const match = jdSkills.some(js => s.includes(js));
                     return <Tag key={s} text={s} color={match ? 'primary' : 'gray'} />;
                   })}

@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Job {
+  id             String   @id @default(cuid())
+  title          String
+  companyType    String
+  headcount      Int
+  responsibilities String
+  requirements   String
+  city           String
+  industry       String
+  generatedJD    String?  // JSON
+  matchRules     String?  // JSON
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  candidates     Candidate[]
+  evaluations    Evaluation[]
+  interviews     Interview[]
+}
+
+model Candidate {
+  id               String   @id @default(cuid())
+  name             String
+  avatar           String
+  phone            String
+  email            String
+  age              Int
+  gender           String
+  school           String
+  schoolTier       String   // 985 | 211 | 双非 | 二本 | 大专
+  degree           String   // 博士 | 硕士 | 本科 | 大专
+  major            String
+  workYears        Int
+  currentCompany   String
+  currentTitle     String
+  jobHoppingCount  Int
+  expectedSalary   String
+  background       String
+  skills           String   // JSON string[]
+  projects         String   // JSON {name, description}[]
+  expectedPosition String
+  stage            String   @default("applied") // applied | screened | interview | offer | hired | rejected
+  resumeText       String?
+  resumeFileName   String?
+  appliedAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  jobId            String
+  job              Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  evaluations      Evaluation[]
+  interviews       Interview[]
+}
+
+model Evaluation {
+  id            String   @id @default(cuid())
+  overallScore  Int
+  level         String   // 强烈推荐 | 推荐 | 待观察 | 不推荐
+  dimensions    String   // JSON ScoreDimension[]
+  strengths     String   // JSON {text, evidence}[]
+  risks         String   // JSON {text, evidence}[]
+  summary       String
+  createdAt     DateTime @default(now())
+
+  candidateId   String
+  candidate     Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobId         String
+  job           Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model Interview {
+  id              String   @id @default(cuid())
+  interviewerName String
+  scheduledAt     DateTime
+  status          String   @default("scheduled") // scheduled | completed | cancelled | pending_feedback
+  questions       String?  // JSON InterviewQuestion[]
+  feedback        String?  // JSON InterviewFeedback
+  createdAt       DateTime @default(now())
+
+  candidateId     String
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobId           String
+  job             Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model FeishuConfig {
+  id            String  @id @default(cuid())
+  appId         String  @default("")
+  appSecret     String  @default("")
+  webhookUrl    String  @default("")
+  loginEnabled  Boolean @default(false)
+  docEnabled    Boolean @default(false)
+  pushEnabled   Boolean @default(false)
+}
