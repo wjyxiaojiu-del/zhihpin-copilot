@@ -1,3 +1,5 @@
+> **中文** | [English](README_en.md)
+
 # 智聘 Copilot — AI 招聘决策助手
 
 面向中小企业的一站式 AI 招聘系统，让招聘更高效、更精准。
